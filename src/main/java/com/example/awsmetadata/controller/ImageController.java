@@ -2,6 +2,7 @@ package com.example.awsmetadata.controller;
 
 import com.example.awsmetadata.model.Image;
 import com.example.awsmetadata.service.ImageService;
+import com.example.awsmetadata.service.SnsService;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -10,15 +11,18 @@ import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 @RestController
 public class ImageController {
 
     private final ImageService imageService;
+    private final SnsService snsService;
 
-    public ImageController(ImageService imageService) {
+    public ImageController(ImageService imageService, SnsService snsService) {
         this.imageService = imageService;
+        this.snsService = snsService;
     }
 
     /**
@@ -107,6 +111,45 @@ public class ImageController {
             return ResponseEntity.status(201).body(saved);
         } catch (IOException e) {
             return ResponseEntity.internalServerError().build();
+        }
+    }
+
+    /**
+     * POST /v1/subscribe/{email}
+     * Subscribes the given email address to the SNS topic.
+     * The subscriber will receive a confirmation email from AWS SNS.
+     */
+    @PostMapping("/v1/subscribe/{email}")
+    public ResponseEntity<Map<String, String>> subscribe(@PathVariable String email) {
+        try {
+            String subscriptionArn = snsService.subscribeEmail(email);
+            return ResponseEntity.ok(Map.of(
+                    "message", "Subscription request sent.",
+                    "subscriptionArn", subscriptionArn
+            ));
+        } catch (Exception e) {
+            return ResponseEntity.internalServerError()
+                    .body(Map.of("error", e.getMessage()));
+        }
+    }
+
+    /**
+     * POST /v1/unsubscribe/{email}
+     * Unsubscribes the given email address from the SNS topic.
+     */
+    @PostMapping("/v1/unsubscribe/{email}")
+    public ResponseEntity<Map<String, String>> unsubscribe(@PathVariable String email) {
+        try {
+            snsService.unsubscribeEmail(email);
+            return ResponseEntity.ok(Map.of(
+                    "message", "Unsubscribed " + email + " from notifications successfully."
+            ));
+        } catch (RuntimeException e) {
+            return ResponseEntity.badRequest()
+                    .body(Map.of("error", e.getMessage()));
+        } catch (Exception e) {
+            return ResponseEntity.internalServerError()
+                    .body(Map.of("error", e.getMessage()));
         }
     }
 }

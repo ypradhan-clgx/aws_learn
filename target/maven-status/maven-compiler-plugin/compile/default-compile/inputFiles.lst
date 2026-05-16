@@ -1,8 +1,0 @@
-C:\corelogic_apps\aws_metadata\aws_metadata\src\main\java\com\example\awsmetadata\AwsMetadataApplication.java
-C:\corelogic_apps\aws_metadata\aws_metadata\src\main\java\com\example\awsmetadata\config\S3Config.java
-C:\corelogic_apps\aws_metadata\aws_metadata\src\main\java\com\example\awsmetadata\controller\ImageController.java
-C:\corelogic_apps\aws_metadata\aws_metadata\src\main\java\com\example\awsmetadata\MetadataController.java
-C:\corelogic_apps\aws_metadata\aws_metadata\src\main\java\com\example\awsmetadata\model\Image.java
-C:\corelogic_apps\aws_metadata\aws_metadata\src\main\java\com\example\awsmetadata\repository\ImageRepository.java
-C:\corelogic_apps\aws_metadata\aws_metadata\src\main\java\com\example\awsmetadata\service\ImageService.java
-C:\corelogic_apps\aws_metadata\aws_metadata\src\main\java\com\example\awsmetadata\service\S3Service.java

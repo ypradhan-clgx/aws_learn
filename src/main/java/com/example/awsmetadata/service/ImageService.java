@@ -15,10 +15,12 @@ public class ImageService {
 
     private final ImageRepository imageRepository;
     private final S3Service s3Service;
+    private final SqsService sqsService;
 
-    public ImageService(ImageRepository imageRepository, S3Service s3Service) {
+    public ImageService(ImageRepository imageRepository, S3Service s3Service, SqsService sqsService) {
         this.imageRepository = imageRepository;
         this.s3Service = s3Service;
+        this.sqsService = sqsService;
     }
 
     /** Returns all image metadata records from RDS. */
@@ -49,6 +51,9 @@ public class ImageService {
 
         // Upload content to S3
         s3Service.uploadFile(buildS3Key(image), file.getBytes(), file.getContentType());
+
+        // Publish image metadata to SQS for async SNS notification
+        sqsService.sendImageUploadMessage(image);
 
         return image;
     }
