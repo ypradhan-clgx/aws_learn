@@ -119,7 +119,7 @@ public class ImageController {
      * Subscribes the given email address to the SNS topic.
      * The subscriber will receive a confirmation email from AWS SNS.
      */
-    @PostMapping("/v1/subscribe/{email}")
+    @PostMapping("/v1/subscribe/{email:.+}")
     public ResponseEntity<Map<String, String>> subscribe(@PathVariable String email) {
         try {
             String subscriptionArn = snsService.subscribeEmail(email);
@@ -137,7 +137,7 @@ public class ImageController {
      * POST /v1/unsubscribe/{email}
      * Unsubscribes the given email address from the SNS topic.
      */
-    @PostMapping("/v1/unsubscribe/{email}")
+    @PostMapping("/v1/unsubscribe/{email:.+}")
     public ResponseEntity<Map<String, String>> unsubscribe(@PathVariable String email) {
         try {
             snsService.unsubscribeEmail(email);

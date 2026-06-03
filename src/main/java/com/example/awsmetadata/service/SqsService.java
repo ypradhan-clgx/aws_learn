@@ -3,31 +3,35 @@ package com.example.awsmetadata.service;
 import com.example.awsmetadata.model.Image;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import jakarta.annotation.PostConstruct;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import software.amazon.awssdk.services.sqs.SqsClient;
 import software.amazon.awssdk.services.sqs.model.*;
 
 import java.util.HashMap;
-import java.util.List;
 import java.util.Map;
 
 @Service
 public class SqsService {
 
     private static final Logger log = LoggerFactory.getLogger(SqsService.class);
-    private static final int MAX_MESSAGES_PER_POLL = 10;
-    private static final int WAIT_TIME_SECONDS = 5;
+    // Consumer constants (kept for reference, consumer is disabled)
+    // private static final int MAX_MESSAGES_PER_POLL = 10;
+    // private static final int WAIT_TIME_SECONDS = 5;
 
     private final SqsClient sqsClient;
     private final SnsService snsService;
     private final ObjectMapper objectMapper;
 
-    @Value("${aws.sqs.queue-url}")
+    @Value("${aws.sqs.queue-url:}")
     private String queueUrl;
+
+    /** Logical queue name used to resolve the URL when no explicit URL is configured. */
+    @Value("${aws.sqs.queue-name:cmtr-t3o1kj45-UploadsNotificationQueue}")
+    private String queueName;
 
     @Value("${server.appBaseUrl:http://localhost:8080}")
     private String appBaseUrl;
@@ -39,7 +43,27 @@ public class SqsService {
     }
 
     /**
-     * Sends image metadata to the SQS queue as a JSON message.
+     * Resolves the effective queue URL on startup.
+     * If {@code aws.sqs.queue-url} is not set, the URL is fetched from AWS
+     * using the queue name {@code cmtr-t3o1kj45-UploadsNotificationQueue}.
+     */
+    @PostConstruct
+    public void resolveQueueUrl() {
+        if (queueUrl == null || queueUrl.isBlank()) {
+            log.info("No SQS queue URL configured – resolving URL for queue '{}'", queueName);
+            GetQueueUrlRequest getUrlRequest = GetQueueUrlRequest.builder()
+                    .queueName(queueName)
+                    .build();
+            queueUrl = sqsClient.getQueueUrl(getUrlRequest).queueUrl();
+            log.info("Resolved SQS queue URL: {}", queueUrl);
+        }
+    }
+
+    // ── Producer ──────────────────────────────────────────────────────────────
+
+    /**
+     * Sends image metadata to the SQS queue {@code cmtr-t3o1kj45-UploadsNotificationQueue}
+     * as a JSON message (Producer logic).
      *
      * @param image the newly uploaded image
      */
@@ -58,20 +82,26 @@ public class SqsService {
                     .build();
 
             SendMessageResponse response = sqsClient.sendMessage(request);
-            log.info("Sent SQS message for image '{}'. MessageId: {}", image.getName(), response.messageId());
+            log.info("Sent SQS message for image '{}' to queue '{}'. MessageId: {}",
+                    image.getName(), queueName, response.messageId());
         } catch (JsonProcessingException e) {
             log.error("Failed to serialize SQS message for image '{}'", image.getName(), e);
             throw new RuntimeException("Failed to send SQS message", e);
         }
     }
 
-    /**
+    // ── Consumer (DISABLED) ───────────────────────────────────────────────────
+    // The consumer logic that processed messages locally has been commented out.
+    // Messages sent to cmtr-t3o1kj45-UploadsNotificationQueue are now intended
+    // to be consumed by an external/dedicated consumer service.
+
+    /*
      * Background consumer: polls the SQS queue every 5 seconds (fixed delay).
      * For each message:
      *   1. Deserializes the image metadata.
      *   2. Publishes an SNS notification.
      *   3. Deletes the message from the queue.
-     */
+     *
     @Scheduled(fixedDelay = 5000)
     public void pollQueue() {
         if (queueUrl == null || queueUrl.isBlank()) {
@@ -104,8 +134,6 @@ public class SqsService {
         }
     }
 
-    // ── Helpers ───────────────────────────────────────────────────────────────
-
     @SuppressWarnings("unchecked")
     private void processMessage(Message message) throws Exception {
         Map<String, Object> payload = objectMapper.readValue(message.body(), Map.class);
@@ -128,5 +156,6 @@ public class SqsService {
         sqsClient.deleteMessage(deleteRequest);
         log.info("Deleted SQS message {}", message.messageId());
     }
+    */
 }
 
