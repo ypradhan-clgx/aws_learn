@@ -11,6 +11,4 @@ public class AwsMetadataApplication {
     public static void main(String[] args) {
         SpringApplication.run(AwsMetadataApplication.class, args);
     }
-
 }
-

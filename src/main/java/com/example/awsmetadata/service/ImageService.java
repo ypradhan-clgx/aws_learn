@@ -2,6 +2,8 @@ package com.example.awsmetadata.service;
 
 import com.example.awsmetadata.model.Image;
 import com.example.awsmetadata.repository.ImageRepository;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -13,24 +15,82 @@ import java.util.Optional;
 @Service
 public class ImageService {
 
+    private static final Logger log = LoggerFactory.getLogger(ImageService.class);
+
     private final ImageRepository imageRepository;
     private final S3Service s3Service;
     private final SqsService sqsService;
+    private final DynamoDbService dynamoDbService;
 
-    public ImageService(ImageRepository imageRepository, S3Service s3Service, SqsService sqsService) {
+    public ImageService(ImageRepository imageRepository, S3Service s3Service,
+                        SqsService sqsService, DynamoDbService dynamoDbService) {
         this.imageRepository = imageRepository;
         this.s3Service = s3Service;
         this.sqsService = sqsService;
+        this.dynamoDbService = dynamoDbService;
     }
 
-    /** Returns all image metadata records from RDS. */
+    /** Returns all image metadata records from RDS and records a view for each. */
     public List<Image> getAllImages() {
-        return imageRepository.findAll();
+        List<Image> images = imageRepository.findAll();
+        images.forEach(img -> {
+            try {
+                dynamoDbService.recordView(img.getId());
+            } catch (Exception e) {
+                log.error("Failed to record view for image {}: {}", img.getId(), e.getMessage());
+            }
+        });
+        return images;
     }
 
-    /** Returns a single image record looked up by name. */
+    /** Returns a single image record looked up by name and records a view if found. */
     public Optional<Image> getImageByName(String name) {
-        return imageRepository.findByName(name);
+        Optional<Image> result = imageRepository.findByName(name);
+        result.ifPresent(img -> {
+            try {
+                dynamoDbService.recordView(img.getId());
+            } catch (Exception e) {
+                log.error("Failed to record view for image {}: {}", img.getId(), e.getMessage());
+            }
+        });
+        return result;
+    }
+
+    /** Finds an image by its ID (no view recording – used for existence checks). */
+    public Optional<Image> findById(String id) {
+        return imageRepository.findById(id);
+    }
+
+    /**
+     * Returns a single image record looked up by ID and records a view if found.
+     * Used by GET /v1/images/{id}.
+     */
+    public Optional<Image> getImageById(String id) {
+        Optional<Image> result = imageRepository.findById(id);
+        result.ifPresent(img -> {
+            try {
+                dynamoDbService.recordView(img.getId());
+            } catch (Exception e) {
+                log.error("Failed to record view for image {}: {}", img.getId(), e.getMessage());
+            }
+        });
+        return result;
+    }
+
+    /**
+     * Downloads the raw file bytes from S3 for a given image ID and
+     * atomically increments the download counter in DynamoDB.
+     * Used by GET /v1/images/{id}/download.
+     */
+    public byte[] downloadImageById(String id) {
+        Image image = imageRepository.findById(id)
+                .orElseThrow(() -> new RuntimeException("Image not found with id: " + id));
+        try {
+            dynamoDbService.recordDownload(image.getId());
+        } catch (Exception e) {
+            log.error("Failed to record download for image {}: {}", image.getId(), e.getMessage());
+        }
+        return s3Service.downloadFile(buildS3Key(image));
     }
 
     /**
@@ -53,15 +113,28 @@ public class ImageService {
         s3Service.uploadFile(buildS3Key(image), file.getBytes(), file.getContentType());
 
         // Publish image metadata to SQS for async SNS notification
-        sqsService.sendImageUploadMessage(image);
+        try {
+            sqsService.sendImageUploadMessage(image);
+        } catch (Exception e) {
+            log.error("Failed to send SQS upload message for image {}: {}", image.getId(), e.getMessage());
+        }
 
         return image;
     }
 
-    /** Downloads the raw file bytes from S3 for a given image name. */
+    /**
+     * Downloads the raw file bytes from S3 for a given image name
+     * and atomically increments the download counter in DynamoDB.
+     */
     public byte[] downloadImage(String name) {
         Image image = imageRepository.findByName(name)
                 .orElseThrow(() -> new RuntimeException("Image not found: " + name));
+        // Record the download before fetching bytes so the counter is always incremented
+        try {
+            dynamoDbService.recordDownload(image.getId());
+        } catch (Exception e) {
+            log.error("Failed to record download for image {}: {}", image.getId(), e.getMessage());
+        }
         return s3Service.downloadFile(buildS3Key(image));
     }
 

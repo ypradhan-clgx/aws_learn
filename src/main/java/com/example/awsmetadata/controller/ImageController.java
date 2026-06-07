@@ -1,6 +1,8 @@
 package com.example.awsmetadata.controller;
 
 import com.example.awsmetadata.model.Image;
+import com.example.awsmetadata.model.ImageStats;
+import com.example.awsmetadata.service.DynamoDbService;
 import com.example.awsmetadata.service.ImageService;
 import com.example.awsmetadata.service.SnsService;
 import org.springframework.http.HttpHeaders;
@@ -19,10 +21,13 @@ public class ImageController {
 
     private final ImageService imageService;
     private final SnsService snsService;
+    private final DynamoDbService dynamoDbService;
 
-    public ImageController(ImageService imageService, SnsService snsService) {
+    public ImageController(ImageService imageService, SnsService snsService,
+                           DynamoDbService dynamoDbService) {
         this.imageService = imageService;
         this.snsService = snsService;
+        this.dynamoDbService = dynamoDbService;
     }
 
     /**
@@ -86,11 +91,54 @@ public class ImageController {
      */
     @DeleteMapping("/v1/images/{id}")
     public ResponseEntity<Void> deleteImage(@PathVariable String id) {
+        String cleanId = id.replaceAll("^\"|\"$", "");
         try {
-            imageService.deleteImage(id);
+            imageService.deleteImage(cleanId);
             return ResponseEntity.noContent().build();
         } catch (RuntimeException e) {
             return ResponseEntity.notFound().build();
+        }
+    }
+
+    /**
+     * GET /v1/images/{id}
+     * Returns the image metadata for the given ID and records a view.
+     * Returns 404 if not found.
+     * Strips surrounding double-quotes from {id} to handle clients that pass
+     * JSON-encoded UUIDs (e.g. jq without -r).
+     */
+    @GetMapping("/v1/images/{id}")
+    public ResponseEntity<Image> getImageById(@PathVariable String id) {
+        String cleanId = id.replaceAll("^\"|\"$", "");
+        Optional<Image> found = imageService.getImageById(cleanId);
+        return found.<ResponseEntity<Image>>map(ResponseEntity::ok)
+                .orElseGet(() -> ResponseEntity.notFound().build());
+    }
+
+    /**
+     * GET /v1/images/{id}/download
+     * Downloads the image file for the given ID and records a download.
+     * Returns 404 if not found.
+     * Strips surrounding double-quotes from {id}.
+     */
+    @GetMapping("/v1/images/{id}/download")
+    public ResponseEntity<byte[]> downloadImageById(@PathVariable String id) {
+        String cleanId = id.replaceAll("^\"|\"$", "");
+        Optional<Image> imageOpt = imageService.findById(cleanId);
+        if (imageOpt.isEmpty()) {
+            return ResponseEntity.notFound().build();
+        }
+        Image image = imageOpt.get();
+        try {
+            byte[] content = imageService.downloadImageById(cleanId);
+            String ext = image.getFileExtension();
+            String filename = image.getName() + (ext == null || ext.isBlank() ? "" : "." + ext);
+            return ResponseEntity.ok()
+                    .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + filename + "\"")
+                    .contentType(MediaType.APPLICATION_OCTET_STREAM)
+                    .body(content);
+        } catch (RuntimeException e) {
+            return ResponseEntity.internalServerError().build();
         }
     }
 
@@ -151,6 +199,24 @@ public class ImageController {
             return ResponseEntity.internalServerError()
                     .body(Map.of("error", e.getMessage()));
         }
+    }
+
+    /**
+     * GET /v1/images/{id}/stats
+     * Returns the current view_count, download_count, last_viewed, and
+     * last_downloaded for the image with the given ID.
+     * Returns 404 if no image with that ID exists.
+     */
+    @GetMapping("/v1/images/{id}/stats")
+    public ResponseEntity<ImageStats> getImageStats(@PathVariable String id) {
+        // Strip surrounding double-quotes that some clients include in the path
+        // e.g. /"uuid"/stats -> "uuid" -> uuid
+        String cleanId = id.replaceAll("^\"|\"$", "");
+        if (imageService.findById(cleanId).isEmpty()) {
+            return ResponseEntity.notFound().build();
+        }
+        ImageStats stats = dynamoDbService.getStats(cleanId);
+        return ResponseEntity.ok(stats);
     }
 }
 
